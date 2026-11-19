@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>DUNGEON SLASHER</title>
+<style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #000; overflow: hidden; font-family: 'Courier New', monospace; cursor: none; user-select: none; }
+    canvas { display: block; }
+    
+    /* HUD */
+    #hud { position: absolute; bottom: 0; left: 0; width: 100%; height: 120px; background: linear-gradient(to top, rgba(40,40,40,0.95), rgba(20,20,20,0.7)); border-top: 3px solid #555; display: flex; justify-content: space-between; align-items: center; padding: 0 30px; color: #fff; pointer-events: none; }
+    .stat-box { text-align: center; }
+    .stat-val { font-size: 48px; font-weight: bold; text-shadow: 0 0 10px currentColor; }
+    .stat-label { font-size: 14px; color: #aaa; letter-spacing: 2px; }
+    #health-val { color: #ff3333; }
+    #ammo-val { color: #ffcc00; }
+    #score-val { color: #33ff33; }
+    
+    /* Weapon Slots */
+    #weapon-bar { position: absolute; bottom: 130px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; pointer-events: none; }
+    .wslot { width: 60px; height: 60px; background: rgba(0,0,0,0.7); border: 2px solid #555; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #888; font-size: 12px; transition: all 0.2s; }
+    .wslot.active { border-color: #ffaa00; color: #ffaa00; background: rgba(255,170,0,0.2); box-shadow: 0 0 15px rgba(255,170,0,0.5); }
+    .wslot .key { font-size: 10px; color: #666; position: absolute; top: 2px; left: 5px; }
+    .wslot.active .key { color: #ffaa00; }
+    
+    /* Crosshair */
+    #crosshair { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); pointer-events: none; color: #0f0; font-size: 24px; text-shadow: 0 0 5px #0f0; opacity: 0.8; }
+    
+    /* Damage Flash */
+    #damage-flash { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: radial-gradient(circle, transparent 30%, rgba(255,0,0,0.6)); pointer-events: none; opacity: 0; transition: opacity 0.1s; }
+    
+    /* Menus */
+    .menu-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); display: flex; flex-direction: column; align-items: center; justify-content: center; color: #fff; z-index: 100; }
+    .menu-title { font-size: 72px; color: #cc0000; text-shadow: 0 0 20px #ff0000, 0 5px 0 #550000; margin-bottom: 40px; letter-spacing: 5px; }
+    .menu-btn { background: none; border: 2px solid #cc0000; color: #fff; padding: 15px 40px; font-size: 24px; font-family: 'Courier New', monospace; cursor: pointer; margin: 10px; transition: all 0.3s; pointer-events: all; }
+    .menu-btn:hover { background: #cc0000; box-shadow: 0 0 20px #ff0000; }
+    .controls-info { margin-top: 40px; color: #888; text-align: center; line-height: 1.8; font-size: 14px; }
+    
+    #minimap { position: absolute; top: 10px; right: 10px; border: 2px solid #333; opacity: 0.7; pointer-events: none; }
+</style>
+</head>
+<body>
+
+<canvas id="game"></canvas>
+<canvas id="minimap" width="160" height="160"></canvas>
+
+<div id="crosshair">+</div>
+<div id="damage-flash"></div>
+
+<div id="weapon-bar">
+    <div class="wslot active" id="ws0"><span class="key">1</span>👊<br><small>Кулаки</small></div>
+    <div class="wslot" id="ws1"><span class="key">2</span>🔪<br><small>Тесак</small></div>
+    <div class="wslot" id="ws2"><span class="key">3</span>🔫<br><small>Пистолет</small></div>
+    <div class="wslot" id="ws3"><span class="key">4</span>💥<br><small>Дробовик</small></div>
+</div>
+
+<div id="hud">
+    <div class="stat-box">
+        <div class="stat-val" id="health-val">100</div>
+        <div class="stat-label">ЗДОРОВЬЕ</div>
+    </div>
+    <div class="stat-box">
+        <div class="stat-val" id="weapon-name" style="font-size:24px; color:#ffaa00;">КУЛАКИ</div>
+        <div class="stat-label">ОРУЖИЕ</div>
+    </div>
+    <div class="stat-box">
+        <div class="stat-val" id="ammo-val">∞</div>
+        <div class="stat-label">ПАТРОНЫ</div>
+    </div>
+    <div class="stat-box">
+        <div class="stat-val" id="score-val">0</div>
+        <div class="stat-label">СЧЁТ</div>
+    </div>
+</div>
+
+<div class="menu-overlay" id="start-menu">
+    <div class="menu-title">DUNGEON SLASHER</div>
+    <button class="menu-btn" id="btn-start">НАЧАТЬ ИГРУ</button>
+    <div class="controls-info">
+        WASD - Движение | МЫШЬ - Обзор<br>
+        ЛКМ - Атака | 1,2,3,4 - Выбор оружия<br>
+        Уничтожь всех монстров в подземелье!
+    </div>
+</div>
+
+<div class="menu-overlay" id="death-menu" style="display:none;">
+    <div class="menu-title" style="color:#fff;">ТЫ МЁРТВ</div>
+    <div style="font-size:24px; margin-bottom:20px;">Счёт: <span id="final-score">0</span></div>
+    <button class="menu-btn" id="btn-restart">ЗАНОВО</button>
+</div>
+
+<script>
+// --- CONFIGURATION ---
+const SCREEN_W = window.innerWidth;
+const SCREEN_H = window.innerHeight;
+const TEX_SIZE = 64;
+const FOV = Math.PI / 3;
+const HALF_FOV = FOV / 2;
+const NUM_RAYS = Math.min(SCREEN_W, 800);
+const MAX_DEPTH = 20;
+const TILE = 1;
+
+// --- CANVAS SETUP ---
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+canvas.width = SCREEN_W;
+canvas.height = SCREEN_H;
+
+const miniCanvas = document.getElementById('minimap');
+const mctx = miniCanvas.getContext('2d');
+
+// --- MAP ---
+const map = [
+    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+    [1,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,1],
+    [1,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,1],
+    [1,0,0,2,2,2,0,0,0,1,0,0,3,3,3,0,0,0,0,1],
+    [1,0,0,2,0,0,0,0,0,0,0,0,0,0,3,0,0,0,0,1],
+    [1,0,0,2,0,0,0,0,0,0,0,0,0,0,3,0,0,0,0,1],
+    [1,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,1],
+    [1,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,1],
+    [1,1,1,0,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1],
+    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+    [1,0,0,4,4,0,0,0,0,0,0,0,0,0,4,4,0,0,0,1],
+    [1,0,0,4,0,0,0,0,0,0,0,0,0,0,0,4,0,0,0,1],
+    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+];
+const MAP_H = map.length;
+const MAP_W = map[0].length;
+
+// --- TEXTURES (Procedural) ---
+function generateTextures() {
+    const textures = [];
+    for(let t=0; t<5; t++) {
+        const c = document.createElement('canvas');
+        c.width = TEX_SIZE; c.height = TEX_SIZE;
+        const cx = c.getContext('2d');
+        
+        if(t===0) { // Gray Brick
+            cx.fillStyle = '#444'; cx.fillRect(0,0,64,64);
+            cx.strokeStyle = '#222'; cx.lineWidth = 2;
+            for(let y=0;y<64;y+=16) { cx.beginPath(); cx.moveTo(0,y); cx.lineTo(64,y); cx.stroke(); }
+            for(let y=0;y<64;y+=32) for(let x=(y%64===0?0:16);x<64;x+=32) { cx.beginPath(); cx.moveTo(x,y); cx.lineTo(x,y+16); cx.stroke(); }
+        } else if(t===1) { // Red Brick
+            cx.fillStyle = '#662222'; cx.fillRect(0,0,64,64);
+            cx.strokeStyle = '#331111'; cx.lineWidth = 2;
+            for(let y=0;y<64;y+=16) { cx.beginPath(); cx.moveTo(0,y); cx.lineTo(64,y); cx.stroke(); }
+            for(let y=0;y<64;y+=32) for(let x=(y%64===0?0:16);x<64;x+=32) { cx.beginPath(); cx.moveTo(x,y); cx.lineTo(x,y+16); cx.stroke(); }
+        } else if(t===2) { // Mossy Stone
+            cx.fillStyle = '#334433'; cx.fillRect(0,0,64,64);
+            for(let i=0;i<50;i++) { cx.fillStyle = `rgba(0,${Math.random()*100+50},0,0.3)`; cx.fillRect(Math.random()*64, Math.random()*64, 4, 4); }
+            cx.strokeStyle = '#223322'; cx.strokeRect(0,0,64,64);
+        } else if(t===3) { // Metal/Tech
+            cx.fillStyle = '#555566'; cx.fillRect(0,0,64,64);
+            cx.fillStyle = '#333344'; cx.fillRect(4,4,56,56);
+            cx.fillStyle = '#777788'; cx.fillRect(28,10,8,44); cx.fillRect(10,28,44,8);
+        } else if(t===4) { // Floor/Ceiling base
+            cx.fillStyle = '#222'; cx.fillRect(0,0,64,64);
+        }
+        textures.push(cx.getImageData(0,0,64,64));
+    }
+    return textures;
+}
+const textures = generateTextures();
+
+// --- WEAPONS ---
+const weapons = [
+    { name: "КУЛАКИ", type: "melee", damage: 25, range: 1.5, cooldown: 400, ammoType: null, spread: 0, pellets: 1, color: "#ffccaa" },
+    { name: "ТЕСАК", type: "melee", damage: 60, range: 2.0, cooldown: 600, ammoType: null, spread: 0, pellets: 1, color: "#cccccc" },
+    { name: "ПИСТОЛЕТ", type: "ranged", damage: 35, range: 15, cooldown: 300, ammoType: "bullets", spread: 0.02, pellets: 1, color: "#ffff00" },
+    { name: "ДРОБОВИК", type: "ranged", damage: 20, range: 10, cooldown: 900, ammoType: "shells", spread: 0.1, pellets: 5, color: "#ff8800" }
+];
+
+// --- PLAYER ---
+let player = {
+    x: 2.5, y: 2.5, angle: 0, health: 100, score: 0,
+    weaponIdx: 0, lastShot: 0, bobPhase: 0, isMoving: false,
+    ammo: { bullets: 50, shells: 20 }
+};
+
+// --- ENEMIES ---
+let enemies = [];
+function spawnEnemies() {
+    enemies = [
+        { x: 5.5, y: 5.5, health: 50, maxHealth: 50, speed: 0.02, type: 0, state: 'idle', attackCd: 0, hitFlash: 0 },
+        { x: 14.5, y: 4.5, health: 50, maxHealth: 50, speed: 0.02, type: 0, state: 'idle', attackCd: 0, hitFlash: 0 },
+        { x: 8.5, y: 12.5, health: 100, maxHealth: 100, speed: 0.015, type: 1, state: 'idle', attackCd: 0, hitFlash: 0 },
+        { x: 15.5, y: 13.5, health: 100, maxHealth: 100, speed: 0.015, type: 1, state: 'idle', attackCd: 0, hitFlash: 0 },
+        { x: 10.5, y: 9.5, health: 200, maxHealth: 200, speed: 0.01, type: 2, state: 'idle', attackCd: 0, hitFlash: 0 },
+        { x: 3.5, y: 13.5, health: 50, maxHealth: 50, speed: 0.025, type: 0, state: 'idle', attackCd: 0, hitFlash: 0 }
+    ];
+}
+
+// --- INPUT ---
+const keys = {};
+let mouseDown = false;
+document.addEventListener('keydown', e => { keys[e.code] = true; switchWeaponKey(e.code); });
+document.addEventListener('keyup', e => keys[e.code] = false);
+document.addEventListener('mousedown', e => { if(e.button === 0) mouseDown = true; });
+document.addEventListener('mouseup', e => { if(e.button === 0) mouseDown = false; });
+document.addEventListener('mousemove', e => {
+    if(document.pointerLockElement === canvas) {
+        player.angle += e.movementX * 0.002;
+    }
+});
+
+function switchWeaponKey(code) {
+    if(code === 'Digit1') switchWeapon(0);
+    if(code === 'Digit2') switchWeapon(1);
+    if(code === 'Digit3') switchWeapon(2);
+    if(code === 'Digit4') switchWeapon(3);
+}
+
+function switchWeapon(idx) {
+    player.weaponIdx = idx;
+    document.querySelectorAll('.wslot').forEach((el, i) => el.classList.toggle('active', i === idx));
+    document.getElementById('weapon-name').innerText = weapons[idx].name;
+    updateHUD();
+}
+
+// --- GAME STATE ---
+let gameRunning = false;
+document.getElementById('btn-start').onclick = () => startGame();
+document.getElementById('btn-restart').onclick = () => startGame();
+
+function startGame() {
+    document.getElementById('start-menu').style.display = 'none';
+    document.getElementById('death-menu').style.display = 'none';
+    player.x = 2.5; player.y = 2.5; player.angle = 0;
+    player.health = 100; player.score = 0;
+    player.ammo = { bullets: 50, shells: 20 };
+    switchWeapon(0);
+    spawnEnemies();
+    gameRunning = true;
+    canvas.requestPointerLock();
+    requestAnimationFrame(gameLoop);
+}
+
+canvas.onclick = () => { if(gameRunning) canvas.requestPointerLock(); };
+
+// --- RAYCASTING ENGINE ---
+let zBuffer = new Array(NUM_RAYS);
+
+function castRays() {
+    const stripWidth = Math.ceil(SCREEN_W / NUM_RAYS);
+    
+    // Draw Ceiling and Floor
+    const gradC = ctx.createLinearGradient(0,0,0,SCREEN_H/2);
+    gradC.addColorStop(0, '#111'); gradC.addColorStop(1, '#333');
+    ctx.fillStyle = gradC; ctx.fillRect(0,0,SCREEN_W,SCREEN_H/2);
+    
+    const gradF = ctx.createLinearGradient(0,SCREEN_H/2,0,SCREEN_H);
+    gradF.addColorStop(0, '#222'); gradF.addColorStop(1, '#0a0a0a');
+    ctx.fillStyle = gradF; ctx.fillRect(0,SCREEN_H/2,SCREEN_W,SCREEN_H/2);
+
+    for(let i = 0; i < NUM_RAYS; i++) {
+        const rayAngle = player.angle - HALF_FOV + (i / NUM_RAYS) * FOV;
+        const sin = Math.sin(rayAngle);
+        const cos = Math.cos(rayAngle);
+        
+        let dist = 0;
+        let hitX, hitY;
+        let texIdx = 0;
+        let side = 0;
+        
+        // DDA Algorithm
+        const stepSize = 0.02;
+        for(dist = 0; dist < MAX_DEPTH; dist += stepSize) {
+            hitX = player.x + cos * dist;
+            hitY = player.y + sin * dist;
+            
+            const mx = Math.floor(hitX);
+            const my = Math.floor(hitY);
+            
+            if(mx < 0 || mx >= MAP_W || my < 0 || my >= MAP_H) { dist = MAX_DEPTH; break; }
+            
+            if(map[my][mx] > 0) {
+                texIdx = map[my][mx] - 1;
+                // Determine side for shading
+                const prevX = player.x + cos * (dist - stepSize);
+                const prevY = player.y + sin * (dist - stepSize);
+                if(Math.floor(prevX) !== mx) side = 0; else side = 1;
+                break;
+            }
+        }
+        
+        // Fix fisheye
+        const corrDist = dist * Math.cos(rayAngle - player.angle);
+        zBuffer[i] = corrDist;
+        
+        const wallHeight = Math.min(SCREEN_H * 2, (SCREEN_H / corrDist));
+        const wallTop = (SCREEN_H - wallHeight) / 2;
+        
+        // Texture mapping coordinate
+        let texX;
+        if(side === 0) texX = hitY % 1; else texX = hitX % 1;
+        if(texX < 0) texX++;
+        const tx = Math.floor(texX * TEX_SIZE);
+        
+        // Draw textured wall strip
+        const texData = textures[texIdx].data;
+        const shade = side === 1 ? 0.7 : 1.0;
+        const fog = Math.max(0, 1 - corrDist / MAX_DEPTH);
+        const finalShade = shade * fog;
+        
+        const imgData = ctx.createImageData(stripWidth, Math.ceil(wallHeight));
+        for(let y = 0; y < wallHeight; y++) {
+            const ty = Math.floor((y / wallHeight) * TEX_SIZE);
+            const pixIdx = (ty * TEX_SIZE + tx) * 4;
+            const r = texData[pixIdx] * finalShade;
+            const g = texData[pixIdx+1] * finalShade;
+            const b = texData[pixIdx+2] * finalShade;
+            
+            for(let sx = 0; sx < stripWidth; sx++) {
+                const dIdx = (y * stripWidth + sx) * 4;
+                imgData.data[dIdx] = r;
+                imgData.data[dIdx+1] = g;
+                imgData.data[dIdx+2] = b;
+                imgData.data[dIdx+3] = 255;
+            }
+        }
+        ctx.putImageData(imgData, i * stripWidth, wallTop);
+    }
+}
+
+// --- SPRITES (ENEMIES) ---
+function drawSprites() {
+    // Sort by distance
+    const sorted = enemies.filter(e => e.health > 0).map(e => {
+        const dx = e.x - player.x;
+        const dy = e.y - player.y;
+        return { ...e, dist: Math.sqrt(dx*dx + dy*dy), dx, dy, ref: e };
+    }).sort((a,b) => b.dist - a.dist);
+
+    const stripWidth = SCREEN_W / NUM_RAYS;
+
+    for(const sprite of sorted) {
+        const angle = Math.atan2(sprite.dy, sprite.dx) - player.angle;
+        // Normalize angle
+        let normAngle = angle;
+        while(normAngle > Math.PI) normAngle -= 2*Math.PI;
+        while(normAngle < -Math.PI) normAngle += 2*Math.PI;
+        
+        if(Math.abs(normAngle) > HALF_FOV + 0.2) continue;
+        
+        const screenX = (0.5 + normAngle / FOV) * SCREEN_W;
+        const size = Math.min(SCREEN_H * 1.5, SCREEN_H / sprite.dist);
+        const halfSize = size / 2;
+        
+        const startX = Math.floor((screenX - halfSize) / stripWidth);
+        const endX = Math.floor((screenX + halfSize) / stripWidth);
+        
+        const fog = Math.max(0, 1 - sprite.dist / MAX_DEPTH);
+        
+        // Colors based on type
+        let bodyColor, eyeColor;
+        if(sprite.type === 0) { bodyColor = [150*fog, 50*fog, 50*fog]; eyeColor = [255*fog, 255*fog, 0]; } // Imp
+        else if(sprite.type === 1) { bodyColor = [50*fog, 150*fog, 50*fog]; eyeColor = [255*fog, 0, 0]; } // Demon
+        else { bodyColor = [100*fog, 50*fog, 150*fog]; eyeColor = [255*fog, 0, 0]; } // Baron
+        
+        if(sprite.ref.hitFlash > 0) { bodyColor = [255,255,255]; sprite.ref.hitFlash--; }
+
+        for(let i = Math.max(0, startX); i <= Math.min(NUM_RAYS-1, endX); i++) {
+            if(sprite.dist < zBuffer[i]) {
+                const relX = (i * stripWidth - (screenX - halfSize)) / size;
+                
+                // Draw simple pixelated monster shape
+                ctx.fillStyle = `rgb(${bodyColor[0]},${bodyColor[1]},${bodyColor[2]})`;
+                
+                // Body
+                if(relX > 0.2 && relX < 0.8) {
+                    ctx.fillRect(i * stripWidth, SCREEN_H/2 - halfSize*0.8, stripWidth+1, size*0.8);
+                }
+                // Head
+                if(relX > 0.3 && relX < 0.7) {
+                    ctx.fillRect(i * stripWidth, SCREEN_H/2 - halfSize, stripWidth+1, size*0.3);
+                    // Eyes
+                    if(relX > 0.35 && relX < 0.45 || relX > 0.55 && relX < 0.65) {
+                        ctx.fillStyle = `rgb(${eyeColor[0]},${eyeColor[1]},${eyeColor[2]})`;
+                        ctx.fillRect(i * stripWidth, SCREEN_H/2 - halfSize*0.85, stripWidth+1, size*0.08);
+                    }
+                }
+            }
+        }
+        
+        // Health bar
+        if(sprite.dist < 10 && sprite.ref.health < sprite.ref.maxHealth) {
+            const barW = size * 0.6;
+            const barH = 5;
+            const barX = screenX - barW/2;
+            const barY = SCREEN_H/2 - halfSize - 15;
+            ctx.fillStyle = '#300'; ctx.fillRect(barX, barY, barW, barH);
+            ctx.fillStyle = '#f00'; ctx.fillRect(barX, barY, barW * (sprite.ref.health / sprite.ref.maxHealth), barH);
+        }
+    }
+}
+
+// --- WEAPON RENDERING ---
+let weaponBob = 0;
+let attackAnim = 0;
+
+function drawWeapon() {
+    const w = weapons[player.weaponIdx];
+    const centerX = SCREEN_W / 2;
+    const centerY = SCREEN_H - 120;
+    const bobX = Math.sin(player.bobPhase) * 10;
+    const bobY = Math.abs(Math.cos(player.bobPhase)) * 10;
+    
+    ctx.save();
+    ctx.translate(centerX + bobX, centerY + bobY);
+    
+    if(attackAnim > 0) {
+        if(w.type === 'melee') ctx.translate(0, -attackAnim * 2);
+        else ctx.translate(0, attackAnim * 0.5);
+        attackAnim -= 5;
+        if(attackAnim < 0) attackAnim = 0;
+    }
+    
+    ctx.shadowBlur = 20;
+    ctx.shadowColor = w.color;
+    
+    if(player.weaponIdx === 0) { // Fists
+        ctx.fillStyle = '#e0ac69';
+        ctx.beginPath(); ctx.arc(-40, 50, 30, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(40, 50, 30, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#c08c49';
+        ctx.fillRect(-60, 60, 40, 60); ctx.fillRect(20, 60, 40, 60);
+    } else if(player.weaponIdx === 1) { // Cleaver
+        ctx.fillStyle = '#888'; ctx.fillRect(10, -50, 15, 120); // Handle
+        ctx.fillStyle = '#ddd'; 
+        ctx.beginPath(); ctx.moveTo(25, -50); ctx.lineTo(80, -30); ctx.lineTo(80, 30); ctx.lineTo(25, 50); ctx.fill(); // Blade
+        ctx.fillStyle = '#a00'; ctx.fillRect(10, -50, 15, 10); // Blood
+        ctx.fillRect(40, -10, 30, 5);
+    } else if(player.weaponIdx === 2) { // Pistol
+        ctx.fillStyle = '#333'; ctx.fillRect(-15, -20, 30, 80); // Barrel
+        ctx.fillStyle = '#222'; ctx.fillRect(-25, 40, 50, 60); // Grip
+        ctx.fillStyle = '#555'; ctx.fillRect(-10, -30, 20, 15); // Sight
+        if(attackAnim > 10) { ctx.fillStyle = '#ff0'; ctx.beginPath(); ctx.arc(0, -30, 15, 0, Math.PI*2); ctx.fill(); }
+    } else if(player.weaponIdx === 3) { // Shotgun
+        ctx.fillStyle = '#444'; ctx.fillRect(-20, -60, 15, 140); ctx.fillRect(5, -60, 15, 140); // Barrels
+        ctx.fillStyle = '#654321'; ctx.fillRect(-30, 50, 60, 80); // Stock
+        ctx.fillStyle = '#222'; ctx.fillRect(-25, 20, 50, 30); // Pump
+        if(attackAnim > 10) { 
+            ctx.fillStyle = '#f80'; ctx.beginPath(); ctx.arc(0, -70, 30, 0, Math.PI*2); ctx.fill();
+            ctx.fillStyle = '#ff0'; ctx.beginPath(); ctx.arc(0, -70, 15, 0, Math.PI*2); ctx.fill();
+        }
+    }
+    
+    ctx.restore();
+}
+
+// --- COMBAT LOGIC ---
+function attack() {
+    const now = Date.now();
+    const w = weapons[player.weaponIdx];
+    
+    if(now - player.lastShot < w.cooldown) return;
+    if(w.ammoType && player.ammo[w.ammoType] <= 0) return;
+    
+    player.lastShot = now;
+    attackAnim = 30;
+    if(w.ammoType) player.ammo[w.ammoType]--;
+    
+    if(w.type === 'melee') {
+        // Check enemies in range and in front
+        for(const e of enemies) {
+            if(e.health <= 0) continue;
+            const dx = e.x - player.x;
+            const dy = e.y - player.y;
+            const dist = Math.sqrt(dx*dx + dy*dy);
+            if(dist > w.range) continue;
+            
+            const angle = Math.atan2(dy, dx);
+            let diff = angle - player.angle;
+            while(diff > Math.PI) diff -= 2*Math.PI;
+            while(diff < -Math.PI) diff += 2*Math.PI;
+            
+            if(Math.abs(diff) < 0.5) {
+                damageEnemy(e, w.damage);
+            }
+        }
+    } else {
+        // Ranged (Hitscan)
+        for(let p = 0; p < w.pellets; p++) {
+            const spread = (Math.random() - 0.5) * w.spread;
+            const rayAngle = player.angle + spread;
+            const cos = Math.cos(rayAngle);
+            const sin = Math.sin(rayAngle);
+            
+            let closestEnemy = null;
+            let closestDist = w.range;
+            
+            for(const e of enemies) {
+                if(e.health <= 0) continue;
+                const dx = e.x - player.x;
+                const dy = e.y - player.y;
+                const dist = Math.sqrt(dx*dx + dy*dy);
+                if(dist > closestDist) continue;
+                
+                // Project enemy onto ray
+                const dot = dx * cos + dy * sin;
+                if(dot < 0) continue;
+                const perpDist = Math.abs(dx * sin - dy * cos);
+                
+                if(perpDist < 0.4 && dot < closestDist) {
+                    // Check wall occlusion
+                    let blocked = false;
+                    for(let d = 0; d < dot; d += 0.1) {
+                        const mx = Math.floor(player.x + cos * d);
+                        const my = Math.floor(player.y + sin * d);
+                        if(map[my] && map[my][mx] > 0) { blocked = true; break; }
+                    }
+                    if(!blocked) {
+                        closestDist = dot;
+                        closestEnemy = e;
+                    }
+                }
+            }
+            
+            if(closestEnemy) {
+                damageEnemy(closestEnemy, w.damage);
+            }
+        }
+    }
+    updateHUD();
+}
+
+function damageEnemy(e, dmg) {
+    e.health -= dmg;
+    e.hitFlash = 5;
+    e.state = 'chase';
+    if(e.health <= 0) {
+        player.score += (e.type + 1) * 100;
+        // Drop ammo sometimes
+        if(Math.random() > 0.5) { player.ammo.bullets += 10; player.ammo.shells += 4; }
+    }
+    updateHUD();
+}
+
+// --- ENEMY AI ---
+function updateEnemies(dt) {
+    for(const e of enemies) {
+        if(e.health <= 0) continue;
+        
+        const dx = player.x - e.x;
+        const dy = player.y - e.y;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        
+        // Wake up if close or shot
+        if(dist < 8) e.state = 'chase';
+        
+        if(e.state === 'chase') {
+            if(dist > 1.2) {
+                const moveX = (dx / dist) * e.speed * dt;
+                const moveY = (dy / dist) * e.speed * dt;
+                
+                // Simple collision
+                if(map[Math.floor(e.y)][Math.floor(e.x + moveX)] === 0) e.x += moveX;
+                if(map[Math.floor(e.y + moveY)][Math.floor(e.x)] === 0) e.y += moveY;
+            } else {
+                // Attack player
+                e.attackCd -= dt;
+                if(e.attackCd <= 0) {
+                    const dmg = e.type === 0 ? 5 : (e.type === 1 ? 10 : 20);
+                    player.health -= dmg;
+                    e.attackCd = 1000;
+                    document.getElementById('damage-flash').style.opacity = '1';
+                    setTimeout(() => document.getElementById('damage-flash').style.opacity = '0', 100);
+                    updateHUD();
+                    if(player.health <= 0) gameOver();
+                }
+            }
+        }
+    }
+}
+
+// --- MOVEMENT ---
+function updatePlayer(dt) {
+    const moveSpeed = 0.05 * dt;
+    const cos = Math.cos(player.angle);
+    const sin = Math.sin(player.angle);
+    let moved = false;
+    
+    let nx = player.x, ny = player.y;
+    
+    if(keys['KeyW']) { nx += cos * moveSpeed; ny += sin * moveSpeed; moved = true; }
+    if(keys['KeyS']) { nx -= cos * moveSpeed; ny -= sin * moveSpeed; moved = true; }
+    if(keys['KeyA']) { nx += sin * moveSpeed; ny -= cos * moveSpeed; moved = true; }
+    if(keys['KeyD']) { nx -= sin * moveSpeed; ny += cos * moveSpeed; moved = true; }
+    
+    // Collision with walls (radius 0.2)
+    const r = 0.2;
+    if(map[Math.floor(player.y)][Math.floor(nx + r * Math.sign(nx-player.x))] === 0) player.x = nx;
+    if(map[Math.floor(ny + r * Math.sign(ny-player.y))][Math.floor(player.x)] === 0) player.y = ny;
+    
+    player.isMoving = moved;
+    if(moved) player.bobPhase += 0.15;
+    
+    if(mouseDown) attack();
+}
+
+// --- MINIMAP ---
+function drawMinimap() {
+    const scale = 8;
+    mctx.fillStyle = 'rgba(0,0,0,0.8)';
+    mctx.fillRect(0,0,160,160);
+    
+    const offsetX = player.x * scale - 80;
+    const offsetY = player.y * scale - 80;
+    
+    for(let y=0; y<MAP_H; y++) {
+        for(let x=0; x<MAP_W; x++) {
+            if(map[y][x] > 0) {
+                mctx.fillStyle = '#444';
+                mctx.fillRect(x*scale - offsetX, y*scale - offsetY, scale, scale);
+            }
+        }
+    }
+    
+    // Enemies
+    for(const e of enemies) {
+        if(e.health <= 0) continue;
+        mctx.fillStyle = '#f00';
+        mctx.beginPath();
+        mctx.arc(e.x*scale - offsetX, e.y*scale - offsetY, 2, 0, Math.PI*2);
+        mctx.fill();
+    }
+    
+    // Player
+    mctx.fillStyle = '#0f0';
+    mctx.beginPath();
+    mctx.arc(80, 80, 3, 0, Math.PI*2);
+    mctx.fill();
+    
+    mctx.strokeStyle = '#0f0';
+    mctx.beginPath();
+    mctx.moveTo(80, 80);
+    mctx.lineTo(80 + Math.cos(player.angle)*15, 80 + Math.sin(player.angle)*15);
+    mctx.stroke();
+}
+
+// --- UI ---
+function updateHUD() {
+    document.getElementById('health-val').innerText = Math.max(0, Math.ceil(player.health));
+    document.getElementById('score-val').innerText = player.score;
+    
+    const w = weapons[player.weaponIdx];
+    if(w.ammoType) {
+        document.getElementById('ammo-val').innerText = player.ammo[w.ammoType];
+    } else {
+        document.getElementById('ammo-val').innerText = '∞';
+    }
+}
+
+function gameOver() {
+    gameRunning = false;
+    document.exitPointerLock();
+    document.getElementById('final-score').innerText = player.score;
+    document.getElementById('death-menu').style.display = 'flex';
+}
+
+// --- MAIN LOOP ---
+let lastTime = 0;
+function gameLoop(time) {
+    if(!gameRunning) return;
+    
+    const dt = Math.min(time - lastTime, 50);
+    lastTime = time;
+    
+    updatePlayer(dt / 16);
+    updateEnemies(dt);
+    
+    // Render
+    ctx.clearRect(0,0,SCREEN_W,SCREEN_H);
+    castRays();
+    drawSprites();
+    drawWeapon();
+    drawMinimap();
+    
+    // Win condition check
+    if(enemies.every(e => e.health <= 0)) {
+        ctx.fillStyle = '#fff';
+        ctx.font = '48px Courier New';
+        ctx.textAlign = 'center';
+        ctx.fillText('ПОДЗЕМЕЛЬЕ ОЧИЩЕНО!', SCREEN_W/2, SCREEN_H/2);
+        ctx.font = '24px Courier New';
+        ctx.fillText('Нажми ESC и обнови страницу для рестарта', SCREEN_W/2, SCREEN_H/2 + 50);
+    }
+    
+    requestAnimationFrame(gameLoop);
+}
+
+// Resize handler
+window.addEventListener('resize', () => {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+});
+</script>
+</body>
+</html>
